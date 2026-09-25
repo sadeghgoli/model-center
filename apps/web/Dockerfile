@@ -1,7 +1,12 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY apps/web/package.json ./
-RUN npm install
+ARG NPM_REGISTRY=https://mirror-npm.runflare.com
+RUN npm config set registry "$NPM_REGISTRY" \
+ && npm config set fetch-retries 5 \
+ && npm config set fetch-retry-mintimeout 20000 \
+ && npm config set fetch-retry-maxtimeout 120000 \
+ && npm install
 
 FROM node:22-alpine AS build
 WORKDIR /app
