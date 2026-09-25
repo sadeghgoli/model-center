@@ -6,7 +6,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 cd "$ROOT"
-
+ 
 info() { printf '%s\n' "$*"; }
 die() { printf 'خطا: %s\n' "$*" >&2; exit 1; }
 
