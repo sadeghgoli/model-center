@@ -14,18 +14,27 @@ if ! command -v docker >/dev/null 2>&1; then
   die "Docker پیدا نشد. اول Docker را نصب کنید."
 fi
 
+DOCKER="docker"
 if ! docker info >/dev/null 2>&1; then
   if command -v systemctl >/dev/null 2>&1; then
-    info "سرویس Docker خاموش است. در حال روشن کردن..."
-    systemctl enable --now docker || sudo systemctl enable --now docker
+    info "سرویس Docker خاموش است یا این کاربر به آن دسترسی ندارد. در حال روشن کردن..."
+    systemctl enable --now docker 2>/dev/null || sudo systemctl enable --now docker
   fi
-  docker info >/dev/null 2>&1 || die "Docker daemon در دسترس نیست."
 fi
 
-if docker compose version >/dev/null 2>&1; then
-  COMPOSE="docker compose"
+if docker info >/dev/null 2>&1; then
+  DOCKER="docker"
+elif sudo docker info >/dev/null 2>&1; then
+  info "Docker روشن است، ولی کاربر فعلی عضو گروه docker نیست. ادامه با sudo."
+  DOCKER="sudo docker"
+else
+  die "Docker daemon در دسترس نیست. وضعیت را با این دستور ببینید: systemctl status docker"
+fi
+
+if $DOCKER compose version >/dev/null 2>&1; then
+  COMPOSE="$DOCKER compose"
 elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE="docker-compose"
+  COMPOSE="sudo docker-compose"
 else
   die "docker compose پیدا نشد. بسته docker-compose-plugin را نصب کنید."
 fi
