@@ -21,6 +21,7 @@ class OllamaRuntime(ModelRuntime):
             "model": deployment["runtime_model_name"],
             "messages": request.get("messages") or [],
             "stream": stream,
+            "think": False,
         }
         if request.get("tools") is not None:
             body["tools"] = request["tools"]
@@ -66,9 +67,10 @@ class OllamaRuntime(ModelRuntime):
         if response.status_code >= 400:
             raise PlatformError("runtime_unavailable", "Runtime rejected the request.", 503)
         message = response.json().get("message") or {}
+        text = message.get("content") or message.get("thinking") or ""
         return completion(
             str(request.get("model") or ""),
-            message.get("content") or "",
+            text,
             message.get("tool_calls"),
             None,
         )
@@ -91,7 +93,10 @@ class OllamaRuntime(ModelRuntime):
                         if not line:
                             continue
                         parsed = json.loads(line)
-                        content = (parsed.get("message") or {}).get("content") or ""
+                        message = parsed.get("message") or {}
+                        content = message.get("content") or ""
+                        if not content and parsed.get("done"):
+                            content = message.get("thinking") or ""
                         if content:
                             yield chunk(model, content)
                         if parsed.get("done"):

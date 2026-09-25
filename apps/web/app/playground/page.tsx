@@ -16,7 +16,6 @@ export default function PlaygroundPage() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [usage, setUsage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   async function onSubmit(event: FormEvent) {
@@ -28,26 +27,53 @@ export default function PlaygroundPage() {
     setDraft("");
     setError("");
     setPending(true);
+    let assistant = "";
     try {
-      const result = await api("/api/backend/api/v1/playground/chat", {
+      const response = await fetch("/api/backend/api/v1/playground/chat", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
           messages: [{ role: "system", content: "تو یک دستیار فارسی هستی." }, ...history],
-          stream: false,
+          stream: true,
           temperature: 0.7,
           max_tokens: 1024,
         }),
       });
-      const content = result.body.choices?.[0]?.message?.content as string | undefined;
-      if (!content) {
-        setError(result.body.error?.message ?? "پاسخی از مدل نرسید.");
+      if (!response.ok || !response.body) {
+        const failed = await response.json().catch(() => ({}));
+        setError(failed.error?.message ?? "پاسخی از مدل نرسید.");
         return;
       }
-      setMessages([...history, { role: "assistant", content }]);
-      const tokens = result.body.usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
-      if (tokens) {
-        setUsage(`ورودی ${tokens.prompt_tokens ?? 0}، خروجی ${tokens.completion_tokens ?? 0}، کل ${tokens.total_tokens ?? 0}`);
+      setMessages([...history, { role: "assistant", content: "" }]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
+          let parsed: { choices?: { delta?: { content?: string } }[] };
+          try {
+            parsed = JSON.parse(data) as { choices?: { delta?: { content?: string } }[] };
+          } catch {
+            continue;
+          }
+          const delta = parsed.choices?.[0]?.delta?.content ?? "";
+          if (!delta) continue;
+          assistant += delta;
+          const visible = assistant;
+          setMessages([...history, { role: "assistant", content: visible }]);
+        }
+      }
+      if (!assistant.trim()) {
+        setError("پاسخی از مدل نرسید.");
       }
     } finally {
       setPending(false);
@@ -76,7 +102,6 @@ export default function PlaygroundPage() {
         ))}
         {pending ? <p>در حال پاسخ…</p> : null}
         {error ? <p className="text-red-700">{error}</p> : null}
-        {usage ? <p className="text-sm text-stone-500">{usage}</p> : null}
       </div>
       <form className="flex gap-2" onSubmit={onSubmit}>
         <Input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="سلام" />

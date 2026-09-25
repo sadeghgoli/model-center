@@ -18,8 +18,15 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       ...(access ? { Authorization: `Bearer ${access}` } : {}),
     },
   });
+  const contentType = response.headers.get("content-type") ?? "application/json";
+  if (contentType.includes("text/event-stream") && response.body) {
+    return new NextResponse(response.body, {
+      status: response.status,
+      headers: { "Content-Type": contentType, "Cache-Control": "no-cache", "X-Accel-Buffering": "no" },
+    });
+  }
   const text = await response.text();
-  return new NextResponse(text, { status: response.status, headers: { "Content-Type": response.headers.get("content-type") ?? "application/json" } });
+  return new NextResponse(text, { status: response.status, headers: { "Content-Type": contentType } });
 }
 
 export const GET = handle;
