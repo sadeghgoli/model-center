@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
-const api = process.env.API_INTERNAL_URL ?? "http://localhost:8090";
+const api = process.env.API_INTERNAL_URL ?? "http://localhost:9005";
 
 async function handle(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;

@@ -1,6 +1,6 @@
 import { Shell } from "@/components/shell";
 
-const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8090";
+const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:9005";
 
 export default function DocsPage() {
   const curl = `curl ${base}/v1/chat/completions \\

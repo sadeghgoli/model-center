@@ -5,7 +5,7 @@ The platform must not depend on a specific inference runtime.
 Model Center is a self-hosted control plane for models, deployments, and an OpenAI-compatible API. Ollama and vLLM are optional external runtimes. The gateway never imports them. GSM is only a client:
 
 ```env
-AI_PLATFORM_BASE_URL=http://localhost:8090/v1
+AI_PLATFORM_BASE_URL=http://localhost:9005/v1
 AI_PLATFORM_API_KEY=sk-gsm-...
 AI_MODEL=qwen3-8b
 ```
@@ -32,7 +32,7 @@ Tests:
 docker compose --env-file .env -f infra/docker/docker-compose.yml exec api pytest -q /srv/tests
 ```
 
-The panel is `http://localhost:3010`. The API is `http://localhost:8090`.
+The panel is `http://localhost:9006`. The API is `http://localhost:9005`. PostgreSQL is on `9007` and Redis is on `9008`.
 
 ## First model
 
@@ -44,7 +44,7 @@ The panel is `http://localhost:3010`. The API is `http://localhost:8090`.
 6. Call the gateway:
 
 ```powershell
-curl http://127.0.0.1:8090/v1/chat/completions -H "Authorization: Bearer sk-gsm-..." -H "Content-Type: application/json" -d "{\"model\":\"qwen3-8b\",\"messages\":[{\"role\":\"user\",\"content\":\"سلام، خودت را معرفی کن.\"}]}"
+curl http://127.0.0.1:9005/v1/chat/completions -H "Authorization: Bearer sk-gsm-..." -H "Content-Type: application/json" -d "{\"model\":\"qwen3-8b\",\"messages\":[{\"role\":\"user\",\"content\":\"سلام، خودت را معرفی کن.\"}]}"
 ```
 
 Add `"stream": true` for SSE. The Playground page calls `/api/v1/playground/chat`, which uses the same router and runtime adapter as `/v1/chat/completions`.

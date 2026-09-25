@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const api = process.env.API_INTERNAL_URL ?? "http://localhost:8090";
+const api = process.env.API_INTERNAL_URL ?? "http://localhost:9005";
 
 export async function POST(request: Request) {
   const payload = await request.json();

@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 30
     ai_platform_secret: str = ""
-    public_base_url: str = "http://localhost:8090"
+    public_base_url: str = "http://localhost:9005"
     default_admin_email: str = ""
     default_admin_password: str = ""
-    cors_origins: str = "http://localhost:3010"
+    cors_origins: str = "http://localhost:9006"
     request_timeout_seconds: float = 60
     max_body_bytes: int = 1_048_576
     app_env: str = "development"

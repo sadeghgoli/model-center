@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       POSTGRES_DB: ${POSTGRES_DB:-modelcenter}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-54329}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-9007}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-modelcenter}"]
       interval: 5s
@@ -18,7 +18,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "127.0.0.1:${REDIS_PORT:-6381}:6379"
+      - "127.0.0.1:${REDIS_PORT:-9008}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -39,10 +39,10 @@ services:
       AI_PLATFORM_SECRET: ${AI_PLATFORM_SECRET:-change-me-platform-secret}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3010}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8090}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:9006}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:9005}
     ports:
-      - "127.0.0.1:${API_PORT:-8090}:8000"
+      - "127.0.0.1:${API_PORT:-9005}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,12 +67,12 @@ services:
       context: ../..
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8090}
+        NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-9005}
     environment:
       API_INTERNAL_URL: http://api:8000
       APP_ENV: development
     ports:
-      - "127.0.0.1:${WEB_PORT:-3010}:3000"
+      - "127.0.0.1:${WEB_PORT:-9006}:3000"
     depends_on:
       - api
 

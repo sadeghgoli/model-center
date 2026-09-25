@@ -65,30 +65,43 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=30
 
 AI_PLATFORM_SECRET=${PLATFORM_SECRET}
-PUBLIC_BASE_URL=http://127.0.0.1:8090
+PUBLIC_BASE_URL=http://127.0.0.1:9005
 
 DEFAULT_ADMIN_EMAIL=
 DEFAULT_ADMIN_PASSWORD=
 
-CORS_ORIGINS=http://127.0.0.1:3010,http://localhost:3010
+CORS_ORIGINS=http://127.0.0.1:9006,http://localhost:9006
 REQUEST_TIMEOUT_SECONDS=60
 MAX_BODY_BYTES=1048576
 
-API_PORT=8090
-WEB_PORT=3010
-POSTGRES_PORT=54329
-REDIS_PORT=6381
+API_PORT=9005
+WEB_PORT=9006
+POSTGRES_PORT=9007
+REDIS_PORT=9008
 POSTGRES_USER=modelcenter
 POSTGRES_PASSWORD=${DB_PASSWORD}
 POSTGRES_DB=modelcenter
 
-AI_PLATFORM_BASE_URL=http://127.0.0.1:8090/v1
+AI_PLATFORM_BASE_URL=http://127.0.0.1:9005/v1
 AI_PLATFORM_API_KEY=
 AI_MODEL=qwen3-8b
 EOF
   chmod 600 .env
 else
-  info ".env از قبل وجود دارد و دست نخورده می‌ماند."
+  info ".env وجود دارد. فقط پورت‌های میزبان به بازه ۹۰۰۵ تا ۹۰۰۸ به‌روز می‌شوند."
+  tmp=$(mktemp)
+  awk '
+    /^API_PORT=/ { print "API_PORT=9005"; next }
+    /^WEB_PORT=/ { print "WEB_PORT=9006"; next }
+    /^POSTGRES_PORT=/ { print "POSTGRES_PORT=9007"; next }
+    /^REDIS_PORT=/ { print "REDIS_PORT=9008"; next }
+    /^PUBLIC_BASE_URL=/ { print "PUBLIC_BASE_URL=http://127.0.0.1:9005"; next }
+    /^CORS_ORIGINS=/ { print "CORS_ORIGINS=http://127.0.0.1:9006,http://localhost:9006"; next }
+    /^AI_PLATFORM_BASE_URL=/ { print "AI_PLATFORM_BASE_URL=http://127.0.0.1:9005/v1"; next }
+    { print }
+  ' .env > "$tmp"
+  mv "$tmp" .env
+  chmod 600 .env
 fi
 
 current_email=$(sed -n 's/^DEFAULT_ADMIN_EMAIL=//p' .env | head -n 1)
@@ -132,7 +145,7 @@ info "منتظر آماده شدن API..."
 ready=0
 i=0
 while [ "$i" -lt 60 ]; do
-  if curl -fsS http://127.0.0.1:8090/health >/dev/null 2>&1; then
+  if curl -fsS http://127.0.0.1:9005/health >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -148,10 +161,10 @@ fi
 
 admin_email=$(sed -n 's/^DEFAULT_ADMIN_EMAIL=//p' .env | head -n 1)
 info "نصب تمام شد."
-info "پنل: http://127.0.0.1:3010"
-info "API:  http://127.0.0.1:8090"
+info "پنل: http://127.0.0.1:9006"
+info "API:  http://127.0.0.1:9005"
 info "ورود پنل با ایمیل: ${admin_email}"
 info "رمز همان مقداری است که موقع نصب وارد کردید و داخل .env مانده است."
 info "سرویس‌ها فقط روی همین ماشین شنود می‌کنند. از رایانه دیگر با تونل SSH وصل شوید:"
-info "ssh -L 3010:127.0.0.1:3010 -L 8090:127.0.0.1:8090 user@this-server"
+info "ssh -L 9006:127.0.0.1:9006 -L 9005:127.0.0.1:9005 user@this-server"
 info "Ollama و vLLM نصب نشدند. بعد از ورود، runtime خارجی را در پنل ثبت کنید."
