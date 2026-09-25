@@ -1,0 +1,6 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { margin: 0; background: #f6f3ee; color: #1c1917; font-family: Tahoma, sans-serif; }
+a { color: inherit; }
