@@ -6,7 +6,7 @@ const links = [
   ["/models", "مدل‌ها"],
   ["/runtimes", "ران‌تایم‌ها"],
   ["/projects", "پروژه‌ها"],
-  ["/playground", "زمین بازی"],
+  ["/playground", "چت"],
   ["/docs", "مستندات API"],
 ];
 

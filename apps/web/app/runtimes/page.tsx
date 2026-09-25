@@ -18,11 +18,23 @@ export default function RuntimesPage() {
   const [type, setType] = useState("vllm");
   const [endpoint, setEndpoint] = useState("http://192.168.1.50:8000/v1");
   const [apiKey, setApiKey] = useState("");
+  const [error, setError] = useState("");
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!orgId) return;
-    await api("/api/backend/api/v1/runtimes", { method: "POST", body: JSON.stringify({ organization_id: orgId, name, slug, type, endpoint, api_key: apiKey }) });
+    setError("");
+    if (!orgId) {
+      setError("اول در صفحه سازمان و پروژه یک سازمان بسازید.");
+      return;
+    }
+    const result = await api("/api/backend/api/v1/runtimes", {
+      method: "POST",
+      body: JSON.stringify({ organization_id: orgId, name, slug, type, endpoint, api_key: apiKey }),
+    });
+    if (!result.body.success) {
+      setError(result.body.error?.message ?? "ثبت ران‌تایم انجام نشد.");
+      return;
+    }
     setApiKey("");
     queryClient.invalidateQueries({ queryKey: ["runtimes", orgId] });
   }
@@ -47,6 +59,7 @@ export default function RuntimesPage() {
         </select>
         <Input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} />
         <Input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="کلید ران‌تایم، اختیاری" />
+        {error ? <p className="text-red-700">{error}</p> : null}
         <Button type="submit">ثبت ران‌تایم</Button>
       </form>
       {(runtimes.data?.body?.data?.runtimes ?? []).map((runtime: { id: string; name: string; type: string; health_status: string; gpu_enabled: boolean; model_count: number }) => (

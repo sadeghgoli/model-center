@@ -121,7 +121,7 @@ class KeyBody(BaseModel):
 
 
 class PlaygroundBody(BaseModel):
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     model: str
     messages: list[dict]
     stream: bool = False
@@ -424,10 +424,37 @@ async def get_dashboard(organization_id: uuid.UUID, request: Request, user: User
 
 @router.post("/playground/chat")
 async def playground(body: PlaygroundBody, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    project = await session.get(Project, body.project_id)
-    if project is None:
-        raise PlatformError("invalid_request", "Project was not found.", 404)
-    await assert_org(session, user, project.organization_id)
+    model = (await session.execute(select(Model).where(Model.slug == body.model, Model.is_active.is_(True)))).scalar_one_or_none()
+    if model is None:
+        raise PlatformError("model_not_found", "Model was not found.", 404)
+    if body.project_id is None:
+        allowed = await member_org_ids(session, user)
+        org_query = select(Organization)
+        if allowed is not None:
+            org_query = org_query.where(Organization.id.in_(allowed or [uuid.uuid4()]))
+        org = (await session.execute(org_query.limit(1))).scalars().first()
+        if org is None:
+            raise PlatformError("invalid_request", "First create an organization.", 404)
+        project = (
+            await session.execute(select(Project).where(Project.organization_id == org.id, Project.slug == "playground"))
+        ).scalars().first()
+        if project is None:
+            project = Project(organization_id=org.id, name="Playground", slug="playground")
+            session.add(project)
+            await session.flush()
+    else:
+        project = await session.get(Project, body.project_id)
+        if project is None:
+            raise PlatformError("invalid_request", "Project was not found.", 404)
+        await assert_org(session, user, project.organization_id)
+    linked = (
+        await session.execute(
+            select(ProjectModel).where(ProjectModel.project_id == project.id, ProjectModel.model_id == model.id)
+        )
+    ).scalar_one_or_none()
+    if linked is None:
+        session.add(ProjectModel(project_id=project.id, model_id=model.id))
+        await session.flush()
     raw, prefix, digest = generate_api_key()
     ephemeral = ApiKey(project_id=project.id, name="playground", key_prefix=prefix, key_hash=digest, status="active")
     session.add(ephemeral)
