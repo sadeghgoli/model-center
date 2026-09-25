@@ -4,14 +4,14 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 from mc_api.services import check_runtime_health
-from mc_shared.db import SessionLocal, init_db
+from mc_shared import db as database
 from mc_shared.models import Deployment, Runtime
 
 
 async def tick() -> None:
-    init_db()
-    assert SessionLocal is not None
-    async with SessionLocal() as session:
+    database.init_db()
+    assert database.SessionLocal is not None
+    async with database.SessionLocal() as session:
         runtimes = (await session.execute(select(Runtime))).scalars().all()
         for runtime in runtimes:
             result = await check_runtime_health(session, runtime)
