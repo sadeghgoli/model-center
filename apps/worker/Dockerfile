@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /srv
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://mirror-pypi.runflare.com/simple -r requirements.txt
 COPY packages packages
 COPY apps/api apps/api
 COPY apps/worker apps/worker
