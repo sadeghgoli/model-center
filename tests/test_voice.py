@@ -4,7 +4,7 @@ import json
 import pytest
 from httpx import AsyncClient
 
-from mc_gateway.gateway import take_sentences
+from mc_gateway.gateway import ReasoningSplitter, _reasoning_styles, take_sentences
 from mc_runtimes.ollama import OllamaRuntime
 from mc_runtimes.speech2text import Speech2TextRuntime, upload_name
 from mc_runtimes.vllm import VLLMRuntime
@@ -36,6 +36,36 @@ async def test_ollama_and_vllm_reject_audio() -> None:
             async for _chunk in runtime.stream_speech(deployment, text="سلام", voice="alloy"):
                 pass
         assert speech_exc.value.status_code == 503
+
+
+def _split(style: str | None, chunks: list[str]) -> tuple[str, str, str]:
+    splitter = ReasoningSplitter(style)
+    parts = [part for chunk in chunks for part in splitter.feed(chunk)] + splitter.finish()
+    thought = "".join(text for kind, text in parts if kind == "reasoning")
+    answer = "".join(text for kind, text in parts if kind == "text")
+    return thought, answer, splitter.learned_style()
+
+
+def test_reasoning_with_both_tags_split_across_chunks() -> None:
+    thought, answer, style = _split(None, ["  <thi", "nk>Okay, the user", " greets.</th", "ink>\n\nسلام!", " خوبی؟"])
+    assert thought == "Okay, the user greets."
+    assert answer == "سلام! خوبی؟"
+    assert style == "tags"
+
+
+def test_reasoning_with_only_closing_tag() -> None:
+    thought, answer, style = _split(None, ["Okay, the user said سلام.", " I should greet.\n</think>\n\n", "سلام، وقت بخیر."])
+    assert "Okay, the user said" in thought
+    assert answer == "سلام، وقت بخیر."
+    assert style == "closing"
+
+
+def test_no_reasoning_is_released_as_answer_and_learned() -> None:
+    thought, answer, style = _split(None, ["سلام.", " چطور کمک کنم؟"])
+    assert answer == "سلام. چطور کمک کنم؟"
+    assert style == "none"
+    splitter = ReasoningSplitter("none")
+    assert splitter.feed("سلام.") == [("text", "سلام.")]
 
 
 def test_upload_name_keeps_or_adds_extension() -> None:
@@ -109,7 +139,7 @@ async def test_speech2text_failed_job_is_runtime_error(monkeypatch) -> None:
     assert exc.value.status_code == 503
 
 
-def _audio_client(speech_inputs: list[str]):
+def _audio_client(speech_inputs: list[str], chat_line: str = 'data: {"choices":[{"index":0,"delta":{"content":"سلام. خوبی؟"}}]}'):
     class FakeResponse:
         status_code = 200
 
@@ -129,7 +159,7 @@ def _audio_client(speech_inputs: list[str]):
             return False
 
         async def aiter_lines(self):
-            yield 'data: {"choices":[{"index":0,"delta":{"content":"سلام. خوبی؟"}}]}'
+            yield chat_line
             yield "data: [DONE]"
 
         async def aiter_bytes(self):
@@ -279,6 +309,26 @@ async def test_transcription_speech_and_voice_stream(client: AsyncClient, monkey
     assert panel.status_code == 200
     assert '"type": "transcript"' in panel.text
     assert "data: [DONE]" in panel.text
+
+    _reasoning_styles.clear()
+    speech_inputs.clear()
+    thinking_line = json.dumps(
+        {"choices": [{"index": 0, "delta": {"content": "Okay, the user greets me.\n</think>\n\nسلام. خوبی؟"}}]},
+        ensure_ascii=False,
+    )
+    monkeypatch.setattr("mc_runtimes.openai_compatible.httpx.AsyncClient", _audio_client(speech_inputs, f"data: {thinking_line}"))
+    thinking = await client.post(
+        "/v1/audio/chat",
+        headers=headers,
+        files={"file": ("speech.webm", b"fake-audio", "audio/webm")},
+        data={"model": "qwen3-8b", "stt_model": "whisper", "tts_model": "tts", "messages": "[]", "language": "fa"},
+    )
+    events = [json.loads(line.removeprefix("data: ")) for line in thinking.text.splitlines() if line.startswith("data: {")]
+    thought = "".join(event["delta"] for event in events if event["type"] == "reasoning")
+    answer = "".join(event["delta"] for event in events if event["type"] == "text")
+    assert "Okay, the user greets me." in thought
+    assert answer == "سلام. خوبی؟"
+    assert speech_inputs == ["سلام.", "خوبی؟"]
 
 
 async def test_vllm_transcription_is_rejected(client: AsyncClient) -> None:

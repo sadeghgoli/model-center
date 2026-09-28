@@ -130,6 +130,104 @@ def take_sentences(buffer: str) -> tuple[list[str], str]:
     return sentences, buffer[start:]
 
 
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+_reasoning_styles: dict[str, str] = {}
+
+
+def _partial_tag(text: str, tag: str) -> int:
+    for size in range(min(len(tag) - 1, len(text)), 0, -1):
+        if text.endswith(tag[:size]):
+            return size
+    return 0
+
+
+class ReasoningSplitter:
+    """Separates model thinking from the spoken answer in a content stream.
+
+    Some chat templates open the <think> block in the prompt, so the stream only
+    carries the closing tag. Until a deployment is known not to do that, text is
+    held back as possible thinking and released as answer if no closing tag arrives.
+    """
+
+    def __init__(self, style: str | None) -> None:
+        self.style = style
+        self.state = "start"
+        self.buffer = ""
+        self.held = ""
+        self.saw_close = False
+        self.saw_open = False
+        self.strip_answer = False
+
+    def use_reasoning_field(self) -> None:
+        if self.state in {"start", "undecided"}:
+            self.state = "answer"
+            self.strip_answer = True
+
+    def _answer(self, text: str) -> list[tuple[str, str]]:
+        if self.strip_answer:
+            text = text.lstrip()
+            if text:
+                self.strip_answer = False
+        return [("text", text)] if text else []
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        self.buffer += text
+        out: list[tuple[str, str]] = []
+        while self.buffer:
+            if self.state == "start":
+                stripped = self.buffer.lstrip()
+                if stripped.startswith(_THINK_OPEN):
+                    self.saw_open = True
+                    self.state = "thinking"
+                    self.buffer = stripped[len(_THINK_OPEN) :]
+                    continue
+                if not stripped or _THINK_OPEN.startswith(stripped):
+                    break
+                self.state = "answer" if self.style == "none" else "undecided"
+                continue
+            if self.state in {"thinking", "undecided"}:
+                index = self.buffer.find(_THINK_CLOSE)
+                if index >= 0:
+                    thought = self.buffer[:index]
+                    if thought:
+                        out.append(("reasoning", thought))
+                    self.saw_close = True
+                    self.held = ""
+                    self.buffer = self.buffer[index + len(_THINK_CLOSE) :]
+                    self.state = "answer"
+                    self.strip_answer = True
+                    continue
+                keep = _partial_tag(self.buffer, _THINK_CLOSE)
+                thought = self.buffer[: len(self.buffer) - keep]
+                self.buffer = self.buffer[len(self.buffer) - keep :]
+                if thought:
+                    out.append(("reasoning", thought))
+                    if self.state == "undecided":
+                        self.held += thought
+                break
+            out.extend(self._answer(self.buffer))
+            self.buffer = ""
+        return out
+
+    def finish(self) -> list[tuple[str, str]]:
+        if self.state == "undecided":
+            self.state = "answer"
+            return self._answer(self.held + self.buffer)
+        if self.state == "start":
+            return self._answer(self.buffer)
+        if self.state == "answer":
+            return self._answer(self.buffer)
+        return []
+
+    def learned_style(self) -> str:
+        if self.saw_close and not self.saw_open:
+            return "closing"
+        if self.saw_open:
+            return "tags"
+        return "none"
+
+
 def _event(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -452,23 +550,42 @@ async def stream_voice_chat(
         voice = str(request.get("voice") or "alloy")
         response_format = str(request.get("response_format") or "wav")
 
+        style_key = str(chat_deployment.id)
+        splitter = ReasoningSplitter(_reasoning_styles.get(style_key))
+
         async def read_llm() -> None:
             nonlocal completion_text, ttft
             buffer = ""
+
+            async def emit(parts: list[tuple[str, str]]) -> None:
+                nonlocal buffer
+                for kind, text in parts:
+                    if kind == "reasoning":
+                        await events.put({"type": "reasoning", "delta": text})
+                        continue
+                    await events.put({"type": "text", "delta": text})
+                    buffer += text
+                    ready, buffer = take_sentences(buffer)
+                    for sentence in ready:
+                        await sentences.put(sentence)
+
             async for item in chat_adapter.stream_chat(_deployment_payload(chat_deployment), chat_request):
                 if ttft is None:
                     ttft = int((time.perf_counter() - started) * 1000)
-                delta = ""
+                content = ""
+                thought = ""
                 for choice in item.get("choices") or []:
-                    delta += str((choice.get("delta") or {}).get("content") or "")
-                if not delta:
-                    continue
-                completion_text += delta
-                await events.put({"type": "text", "delta": delta})
-                buffer += delta
-                ready, buffer = take_sentences(buffer)
-                for sentence in ready:
-                    await sentences.put(sentence)
+                    delta = choice.get("delta") or {}
+                    content += str(delta.get("content") or "")
+                    thought += str(delta.get("reasoning_content") or delta.get("reasoning") or "")
+                completion_text += thought + content
+                if thought:
+                    splitter.use_reasoning_field()
+                    await events.put({"type": "reasoning", "delta": thought})
+                if content:
+                    await emit(splitter.feed(content))
+            await emit(splitter.finish())
+            _reasoning_styles[style_key] = splitter.learned_style()
             tail = buffer.strip()
             if any(item.isalnum() for item in tail):
                 await sentences.put(tail)

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = { role: "user" | "assistant"; content: string; reasoning?: string };
 type ModelChoice = { slug: string; display_name: string; is_active: boolean; model_type?: string };
 type VoiceEvent = { type?: string; text?: string; delta?: string; audio?: string; format?: string };
 
@@ -152,6 +152,7 @@ export default function PlaygroundPage() {
     setError("");
     setPending(true);
     let assistant = "";
+    let reasoning = "";
     let shown = history;
     try {
       const form = new FormData();
@@ -162,7 +163,13 @@ export default function PlaygroundPage() {
       form.append("voice", voiceName || "hello");
       form.append("language", language || "fa");
       form.append("response_format", "wav");
-      form.append("messages", JSON.stringify([{ role: "system", content: "تو یک دستیار فارسی هستی." }, ...history]));
+      form.append(
+        "messages",
+        JSON.stringify([
+          { role: "system", content: "تو یک دستیار فارسی هستی." },
+          ...history.map((item) => ({ role: item.role, content: item.content })),
+        ]),
+      );
       const response = await fetch("/api/backend/api/v1/playground/voice", { method: "POST", body: form });
       if (!response.ok || !response.body) {
         const failed = await response.json().catch(() => ({}));
@@ -192,10 +199,10 @@ export default function PlaygroundPage() {
             shown = [...history, { role: "user", content: parsed.text }];
             setMessages(shown);
           }
-          if (parsed.type === "text" && parsed.delta) {
-            assistant += parsed.delta;
-            const visible = assistant;
-            setMessages([...shown, { role: "assistant", content: visible }]);
+          if ((parsed.type === "text" || parsed.type === "reasoning") && parsed.delta) {
+            if (parsed.type === "text") assistant += parsed.delta;
+            else reasoning += parsed.delta;
+            setMessages([...shown, { role: "assistant", content: assistant, reasoning }]);
           }
           if (parsed.type === "audio" && parsed.audio) enqueueClip(decodeAudio(parsed.audio), parsed.format ?? "wav");
         }
@@ -292,10 +299,20 @@ export default function PlaygroundPage() {
       <div className="grid min-h-80 gap-3 rounded-xl border border-stone-200 bg-white p-4">
         {messages.length === 0 ? <p className="text-stone-500">{mode === "voice" ? "ضبط را شروع کنید تا مدل جواب بدهد." : "پیام بنویسید تا مدل جواب بدهد."}</p> : null}
         {messages.map((message, index) => (
-          <p key={`${message.role}-${index}`} className={message.role === "user" ? "text-stone-900" : "text-emerald-800"}>
-            <strong>{message.role === "user" ? "شما: " : "مدل: "}</strong>
-            {message.content}
-          </p>
+          <div key={`${message.role}-${index}`} className="grid gap-1">
+            {message.reasoning ? (
+              <details className="text-sm text-stone-500">
+                <summary className="cursor-pointer">{message.content ? "فکر مدل" : "در حال فکر کردن…"}</summary>
+                <p className="whitespace-pre-wrap" dir="auto">{message.reasoning.trim()}</p>
+              </details>
+            ) : null}
+            {message.content || !message.reasoning ? (
+              <p className={message.role === "user" ? "text-stone-900" : "text-emerald-800"}>
+                <strong>{message.role === "user" ? "شما: " : "مدل: "}</strong>
+                {message.content}
+              </p>
+            ) : null}
+          </div>
         ))}
         {recording ? <p>در حال ضبط…</p> : null}
         {pending ? <p>در حال پاسخ…</p> : null}
