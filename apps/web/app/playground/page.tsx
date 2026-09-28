@@ -23,9 +23,9 @@ const phaseLabels: Record<Phase, string> = {
 };
 const FRAME_MS = 50;
 const CALIBRATE_MS = 400;
-const SPEECH_START_MS = 150;
+const SPEECH_START_MS = 200;
 const SILENCE_END_MS = 1000;
-const MIN_SPEECH_MS = 400;
+const MIN_SPEECH_MS = 600;
 const MAX_TURN_MS = 30000;
 const IDLE_RESTART_MS = 15000;
 
@@ -220,7 +220,9 @@ export default function PlaygroundPage() {
       const response = await fetch("/api/backend/api/v1/playground/voice", { method: "POST", body: form, signal: controller.signal });
       if (!response.ok || !response.body) {
         const failed = await response.json().catch(() => ({}));
-        setError(failed.error?.message ?? "پاسخی از مدل نرسید.");
+        const message: string = failed.error?.message ?? "";
+        if (talking.current && message === "Speech was not recognized.") return;
+        setError(message || `پاسخی از مدل نرسید (کد ${response.status}).`);
         return;
       }
       const reader = response.body.getReader();
@@ -323,7 +325,7 @@ export default function PlaygroundPage() {
         calibrated += FRAME_MS;
         return;
       }
-      const threshold = Math.max(0.012, noise * 3);
+      const threshold = Math.max(0.02, noise * 3.5);
       if (level > threshold) {
         loud += FRAME_MS;
         quiet = 0;
