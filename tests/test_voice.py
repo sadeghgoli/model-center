@@ -4,7 +4,7 @@ import json
 import pytest
 from httpx import AsyncClient
 
-from mc_gateway.gateway import ReasoningSplitter, _reasoning_styles, take_sentences
+from mc_gateway.gateway import ReasoningSplitter, _reasoning_styles, remember_reasoning_style, take_sentences
 from mc_runtimes.ollama import OllamaRuntime
 from mc_runtimes.speech2text import Speech2TextRuntime, upload_name
 from mc_runtimes.vllm import VLLMRuntime
@@ -66,6 +66,65 @@ def test_no_reasoning_is_released_as_answer_and_learned() -> None:
     assert style == "none"
     splitter = ReasoningSplitter("none")
     assert splitter.feed("سلام.") == [("text", "سلام.")]
+
+
+def test_closing_tag_after_learning_none_is_not_spoken_and_relearned() -> None:
+    thought, answer, style = _split("none", ["Okay thinking.</th", "ink>سلام."])
+    assert "</think>" not in answer
+    assert answer.endswith("سلام.")
+    assert style == "closing"
+
+
+def test_none_style_needs_several_tagless_replies() -> None:
+    _reasoning_styles.clear()
+    for _ in range(2):
+        remember_reasoning_style("deployment", "none")
+    assert "deployment" not in _reasoning_styles
+    remember_reasoning_style("deployment", "none")
+    assert _reasoning_styles["deployment"] == "none"
+    remember_reasoning_style("deployment", "closing")
+    assert _reasoning_styles["deployment"] == "closing"
+    _reasoning_styles.clear()
+
+
+async def test_ollama_stream_keeps_thinking_separate(monkeypatch) -> None:
+    lines = [
+        json.dumps({"message": {"role": "assistant", "content": "", "thinking": "Okay, the user"}, "done": False}),
+        json.dumps({"message": {"role": "assistant", "content": "سلام."}, "done": False}),
+        json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}),
+    ]
+
+    class Response:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def aiter_lines(self):
+            for line in lines:
+                yield line
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr("mc_runtimes.ollama.httpx.AsyncClient", Client)
+    runtime = OllamaRuntime("http://ollama:11434")
+    deltas = [item["choices"][0]["delta"] async for item in runtime.stream_chat({"runtime_model_name": "qwen3:4b"}, {"model": "qwen3-4b"})]
+    assert deltas[0] == {"reasoning_content": "Okay, the user"}
+    assert deltas[1] == {"content": "سلام."}
 
 
 def test_upload_name_keeps_or_adds_extension() -> None:

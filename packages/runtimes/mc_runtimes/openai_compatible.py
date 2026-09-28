@@ -38,8 +38,10 @@ def completion(model: str, content: str, tool_calls: list | None, usage: dict | 
     }
 
 
-def chunk(model: str, content: str, finish: str | None = None) -> dict[str, Any]:
+def chunk(model: str, content: str, finish: str | None = None, reasoning: str = "") -> dict[str, Any]:
     delta: dict[str, Any] = {"content": content} if content else {}
+    if reasoning:
+        delta["reasoning_content"] = reasoning
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion.chunk",

@@ -206,8 +206,16 @@ class ReasoningSplitter:
                     if self.state == "undecided":
                         self.held += thought
                 break
-            out.extend(self._answer(self.buffer))
-            self.buffer = ""
+            index = self.buffer.find(_THINK_CLOSE)
+            if index >= 0:
+                self.saw_close = True
+                out.extend(self._answer(self.buffer[:index]))
+                self.buffer = self.buffer[index + len(_THINK_CLOSE) :]
+                continue
+            keep = _partial_tag(self.buffer, _THINK_CLOSE)
+            out.extend(self._answer(self.buffer[: len(self.buffer) - keep]))
+            self.buffer = self.buffer[len(self.buffer) - keep :]
+            break
         return out
 
     def finish(self) -> list[tuple[str, str]]:
@@ -226,6 +234,22 @@ class ReasoningSplitter:
         if self.saw_open:
             return "tags"
         return "none"
+
+
+_TAGLESS_RUNS_BEFORE_NONE = 3
+_tagless_runs: dict[str, int] = {}
+
+
+def remember_reasoning_style(key: str, style: str) -> None:
+    """Streams answers directly only after several replies arrive without thinking tags."""
+    if style != "none":
+        _tagless_runs.pop(key, None)
+        _reasoning_styles[key] = style
+        return
+    runs = _tagless_runs.get(key, 0) + 1
+    _tagless_runs[key] = runs
+    if runs >= _TAGLESS_RUNS_BEFORE_NONE:
+        _reasoning_styles[key] = "none"
 
 
 def _event(payload: dict) -> str:
@@ -585,7 +609,7 @@ async def stream_voice_chat(
                 if content:
                     await emit(splitter.feed(content))
             await emit(splitter.finish())
-            _reasoning_styles[style_key] = splitter.learned_style()
+            remember_reasoning_style(style_key, splitter.learned_style())
             tail = buffer.strip()
             if any(item.isalnum() for item in tail):
                 await sentences.put(tail)

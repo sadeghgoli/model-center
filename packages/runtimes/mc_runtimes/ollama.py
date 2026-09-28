@@ -95,10 +95,9 @@ class OllamaRuntime(ModelRuntime):
                         parsed = json.loads(line)
                         message = parsed.get("message") or {}
                         content = message.get("content") or ""
-                        if not content and parsed.get("done"):
-                            content = message.get("thinking") or ""
-                        if content:
-                            yield chunk(model, content)
+                        thinking = message.get("thinking") or ""
+                        if content or thinking:
+                            yield chunk(model, content, reasoning=thinking)
                         if parsed.get("done"):
                             yield chunk(model, "", "stop")
         except PlatformError:
