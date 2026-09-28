@@ -58,13 +58,45 @@ export default function ModelDetailPage() {
         <Input value={runtimeModel} onChange={(event) => setRuntimeModel(event.target.value)} />
         <Button type="submit">استقرار</Button>
       </form>
-      {(deployments.data?.body?.data?.deployments ?? []).map((item: { id: string; name: string; runtime_type: string; status: string; gpu_required: number; runtime_model_name: string }) => (
-        <Card key={item.id}>
-          <strong>{item.name}</strong>
-          <p>ران‌تایم: {item.runtime_type} — وضعیت: {item.status} — GPU: {item.gpu_required}</p>
-          <p>{item.runtime_model_name}</p>
-        </Card>
+      {(deployments.data?.body?.data?.deployments ?? []).map((item: DeploymentItem) => (
+        <DeploymentCard key={item.id} item={item} onSaved={() => queryClient.invalidateQueries({ queryKey: ["deployments", params.id] })} />
       ))}
     </Shell>
+  );
+}
+
+type DeploymentItem = { id: string; name: string; runtime_type: string; status: string; gpu_required: number; runtime_model_name: string };
+
+function DeploymentCard({ item, onSaved }: { item: DeploymentItem; onSaved: () => void }) {
+  const [runtimeModel, setRuntimeModel] = useState(item.runtime_model_name);
+  const [message, setMessage] = useState("");
+
+  async function update(fields: Record<string, string>) {
+    const response = await api(`/api/backend/api/v1/deployments/${item.id}`, { method: "PATCH", body: JSON.stringify(fields) });
+    const saved = response.status < 400;
+    setMessage(saved ? "ذخیره شد." : response.body?.error?.message ?? "ذخیره نشد.");
+    if (saved) onSaved();
+  }
+
+  return (
+    <Card>
+      <strong>{item.name}</strong>
+      <p>ران‌تایم: {item.runtime_type} — وضعیت: {item.status === "running" ? "فعال" : "متوقف"} — GPU: {item.gpu_required}</p>
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          update({ runtime_model_name: runtimeModel });
+        }}
+      >
+        <label className="text-sm">نام مدل ران‌تایم:</label>
+        <Input className="max-w-sm" dir="ltr" value={runtimeModel} onChange={(event) => setRuntimeModel(event.target.value)} />
+        <Button type="submit" disabled={!runtimeModel.trim() || runtimeModel.trim() === item.runtime_model_name}>ذخیره</Button>
+        <Button type="button" onClick={() => update({ desired_status: item.status === "running" ? "stopped" : "running" })}>
+          {item.status === "running" ? "توقف" : "فعال‌سازی"}
+        </Button>
+      </form>
+      {message ? <p className="text-sm">{message}</p> : null}
+    </Card>
   );
 }

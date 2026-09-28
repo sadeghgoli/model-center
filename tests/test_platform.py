@@ -191,6 +191,14 @@ async def test_rate_limit_and_unhealthy_route(client: AsyncClient, monkeypatch) 
         headers=auth(access),
         json={"model_id": model_id, "runtime_id": runtime_id, "name": "good", "slug": "good", "runtime_model_name": "Qwen/Qwen3-8B"},
     )
+    good_id = good.json()["data"]["id"]
+    renamed = await client.patch(f"/api/v1/deployments/{good_id}", headers=auth(access), json={"runtime_model_name": " Qwen/Qwen3-8B-Instruct "})
+    assert renamed.status_code == 200
+    assert renamed.json()["data"]["runtime_model_name"] == "Qwen/Qwen3-8B-Instruct"
+    rejected = await client.patch(f"/api/v1/deployments/{good_id}", headers=auth(access), json={"desired_status": "paused"})
+    assert rejected.status_code == 400
+    restored = await client.patch(f"/api/v1/deployments/{good_id}", headers=auth(access), json={"runtime_model_name": "Qwen/Qwen3-8B"})
+    assert restored.json()["data"]["runtime_model_name"] == "Qwen/Qwen3-8B"
     from sqlalchemy import select
     from mc_shared import db as database
     from mc_shared.models import Deployment

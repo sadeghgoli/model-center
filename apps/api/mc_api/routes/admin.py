@@ -111,6 +111,12 @@ class DeploymentBody(BaseModel):
     configuration: dict = Field(default_factory=dict)
 
 
+class DeploymentUpdate(BaseModel):
+    name: str | None = None
+    runtime_model_name: str | None = None
+    desired_status: str | None = None
+
+
 class KeyBody(BaseModel):
     name: str
     model_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -324,6 +330,32 @@ async def list_deployments(request: Request, model_id: uuid.UUID | None = None, 
         query = query.where(Runtime.organization_id.in_(allowed or [uuid.uuid4()]))
     rows = (await session.execute(query)).all()
     return ok(request, {"deployments": [public_deployment(deployment, runtime) for deployment, runtime in rows]})
+
+
+@router.patch("/deployments/{deployment_id}")
+async def patch_deployment(deployment_id: uuid.UUID, body: DeploymentUpdate, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+    assert_manager(user)
+    deployment = await session.get(Deployment, deployment_id)
+    if deployment is None:
+        raise PlatformError("invalid_request", "Deployment was not found.", 404)
+    runtime = await session.get(Runtime, deployment.runtime_id)
+    await assert_org(session, user, runtime.organization_id)
+    if body.name is not None:
+        if not body.name.strip():
+            raise PlatformError("invalid_request", "Name is required.", 400)
+        deployment.name = body.name.strip()
+    if body.runtime_model_name is not None:
+        if not body.runtime_model_name.strip():
+            raise PlatformError("invalid_request", "Runtime model name is required.", 400)
+        deployment.runtime_model_name = body.runtime_model_name.strip()
+    if body.desired_status is not None:
+        if body.desired_status not in {"running", "stopped"}:
+            raise PlatformError("invalid_request", "Status must be running or stopped.", 400)
+        deployment.desired_status = body.desired_status
+        deployment.status = body.desired_status
+    await session.commit()
+    await session.refresh(deployment)
+    return ok(request, public_deployment(deployment, runtime))
 
 
 @router.post("/deployments/{deployment_id}/stop")
