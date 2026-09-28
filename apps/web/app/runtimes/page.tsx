@@ -55,6 +55,7 @@ export default function RuntimesPage() {
           <option value="vllm">vLLM</option>
           <option value="openai_compatible">OpenAI Compatible</option>
           <option value="custom">Custom</option>
+          <option value="speech2text">Speech2Text (تشخیص گفتار)</option>
           <option value="local">Local</option>
         </select>
         <Input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} />

@@ -177,7 +177,7 @@ async def create_runtime(session: AsyncSession, user: User, fields: dict) -> Run
         status="offline",
         health_status="unknown",
     )
-    if runtime.type not in {"local", "ollama", "vllm", "openai_compatible", "custom"}:
+    if runtime.type not in {"local", "ollama", "vllm", "openai_compatible", "custom", "speech2text"}:
         raise PlatformError("invalid_request", "Runtime type is not supported.", 422)
     session.add(runtime)
     await session.commit()

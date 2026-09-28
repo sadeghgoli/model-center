@@ -5,6 +5,7 @@ from mc_shared.settings import get_settings
 from mc_runtimes.local import LocalRuntime
 from mc_runtimes.ollama import OllamaRuntime
 from mc_runtimes.openai_compatible import OpenAICompatibleRuntime
+from mc_runtimes.speech2text import Speech2TextRuntime
 from mc_runtimes.vllm import VLLMRuntime
 from mc_runtimes.base import ModelRuntime
 
@@ -21,4 +22,6 @@ def build_runtime(runtime: Runtime) -> ModelRuntime:
         return VLLMRuntime(runtime.endpoint, api_key, timeout)
     if kind in {"openai_compatible", "custom"}:
         return OpenAICompatibleRuntime(runtime.endpoint, api_key, timeout)
+    if kind == "speech2text":
+        return Speech2TextRuntime(runtime.endpoint, api_key, timeout)
     raise PlatformError("runtime_unavailable", "Runtime type is not supported.", 503)

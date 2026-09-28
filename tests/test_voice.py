@@ -6,6 +6,7 @@ from httpx import AsyncClient
 
 from mc_gateway.gateway import take_sentences
 from mc_runtimes.ollama import OllamaRuntime
+from mc_runtimes.speech2text import Speech2TextRuntime, upload_name
 from mc_runtimes.vllm import VLLMRuntime
 from mc_shared.errors import PlatformError
 from tests.conftest import auth, token
@@ -35,6 +36,77 @@ async def test_ollama_and_vllm_reject_audio() -> None:
             async for _chunk in runtime.stream_speech(deployment, text="سلام", voice="alloy"):
                 pass
         assert speech_exc.value.status_code == 503
+
+
+def test_upload_name_keeps_or_adds_extension() -> None:
+    assert upload_name("speech.webm", "audio/webm") == "speech.webm"
+    assert upload_name("blob", "audio/webm;codecs=opus") == "blob.webm"
+    assert upload_name("", "audio/wav") == "audio.wav"
+    assert upload_name("../../etc/clip.mp3", "") == "clip.mp3"
+
+
+def _speech2text_client(states: list[dict], calls: list[tuple[str, str]]):
+    class Reply:
+        def __init__(self, status_code: int, body: dict):
+            self.status_code = status_code
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.headers = kwargs.get("headers") or {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, **kwargs):
+            calls.append(("POST", url))
+            assert self.headers["Authorization"] == "Bearer sk_stt_test"
+            assert kwargs["files"]["file"][0] == "speech.webm"
+            assert kwargs["data"] == {"language": "fa", "model": "large-v3"}
+            return Reply(202, {"success": True, "job_id": "job-1", "status": "queued"})
+
+        async def get(self, url, **kwargs):
+            calls.append(("GET", url))
+            return Reply(200, states.pop(0))
+
+        async def delete(self, url, **kwargs):
+            calls.append(("DELETE", url))
+            return Reply(200, {})
+
+    return FakeClient
+
+
+async def test_speech2text_polls_until_completed(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+    states = [{"status": "queued"}, {"status": "processing"}, {"status": "completed", "text": "سلام"}]
+    monkeypatch.setattr("mc_runtimes.speech2text.httpx.AsyncClient", _speech2text_client(states, calls))
+    runtime = Speech2TextRuntime("https://stt.test/api/v1", "sk_stt_test", timeout=30)
+    runtime.poll_interval = 0
+    result = await runtime.transcribe(
+        {"runtime_model_name": "large-v3"}, audio=b"x", filename="speech.webm", content_type="audio/webm", language="fa"
+    )
+    assert result == {"text": "سلام"}
+    assert calls[0] == ("POST", "/api/v1/transcriptions")
+    assert calls[-1] == ("GET", "/api/v1/transcriptions/job-1")
+
+
+async def test_speech2text_failed_job_is_runtime_error(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+    states = [{"status": "failed", "error_message": "bad audio"}]
+    monkeypatch.setattr("mc_runtimes.speech2text.httpx.AsyncClient", _speech2text_client(states, calls))
+    runtime = Speech2TextRuntime("https://stt.test", "sk_stt_test", timeout=30)
+    runtime.poll_interval = 0
+    with pytest.raises(PlatformError) as exc:
+        await runtime.transcribe(
+            {"runtime_model_name": "large-v3"}, audio=b"x", filename="speech.webm", content_type="audio/webm", language="fa"
+        )
+    assert exc.value.status_code == 503
 
 
 def _audio_client(speech_inputs: list[str]):
