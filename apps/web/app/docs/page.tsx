@@ -17,6 +17,25 @@ print(response.choices[0].message.content)`;
   headers: { Authorization: "Bearer sk-gsm-...", "Content-Type": "application/json" },
   body: JSON.stringify({ model: "qwen3-8b", messages: [{ role: "user", content: "سلام" }] })
 });`;
+  const transcribe = `curl ${base}/v1/audio/transcriptions \\
+  -H "Authorization: Bearer sk-gsm-xxxxxxxx" \\
+  -F "file=@speech.webm" \\
+  -F "model=whisper" \\
+  -F "language=fa"`;
+  const speech = `curl ${base}/v1/audio/speech \\
+  -H "Authorization: Bearer sk-gsm-xxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"tts","input":"سلام","voice":"alloy"}' \\
+  --output reply.mp3`;
+  const voice = `curl ${base}/v1/audio/chat \\
+  -H "Authorization: Bearer sk-gsm-xxxxxxxx" \\
+  -F "file=@speech.webm" \\
+  -F "model=qwen3-8b" \\
+  -F "stt_model=whisper" \\
+  -F "tts_model=tts" \\
+  -F "messages=[]" \\
+  -F "voice=alloy" \\
+  -F "language=fa"`;
   return (
     <Shell>
       <h1 className="text-2xl">مستندات API</h1>
@@ -24,6 +43,10 @@ print(response.choices[0].message.content)`;
       <pre className="overflow-auto rounded-xl bg-stone-900 p-4 text-left text-sm text-stone-100" dir="ltr">{python}</pre>
       <pre className="overflow-auto rounded-xl bg-stone-900 p-4 text-left text-sm text-stone-100" dir="ltr">{javascript}</pre>
       <pre className="overflow-auto rounded-xl bg-stone-900 p-4 text-left text-sm text-stone-100" dir="ltr">{javascript.replace("const response", "const response: Response")}</pre>
+      <h2 className="text-xl">صوت</h2>
+      <pre className="overflow-auto rounded-xl bg-stone-900 p-4 text-left text-sm text-stone-100" dir="ltr">{transcribe}</pre>
+      <pre className="overflow-auto rounded-xl bg-stone-900 p-4 text-left text-sm text-stone-100" dir="ltr">{speech}</pre>
+      <pre className="overflow-auto rounded-xl bg-stone-900 p-4 text-left text-sm text-stone-100" dir="ltr">{voice}</pre>
     </Shell>
   );
 }

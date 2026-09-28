@@ -28,7 +28,11 @@ app.add_middleware(
 @app.middleware("http")
 async def context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     body = await request.body()
-    if len(body) > get_settings().max_body_bytes:
+    limit = get_settings().max_body_bytes
+    path = request.url.path
+    if path.startswith("/v1/audio") or path.endswith("/playground/voice"):
+        limit = max(limit, 8 * 1024 * 1024)
+    if len(body) > limit:
         return JSONResponse(status_code=413, content=openai_error(PlatformError("invalid_request", "Request is too large.", 413)))
     request.state.request_id = str(uuid.uuid4())
     response = await call_next(request)

@@ -131,3 +131,74 @@ class OpenAICompatibleRuntime(ModelRuntime):
             raise PlatformError("timeout", "Runtime timed out.", 504) from exc
         except httpx.HTTPError as exc:
             raise PlatformError("runtime_unavailable", "Runtime is unavailable.", 503) from exc
+
+    def _auth_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    async def transcribe(
+        self,
+        deployment: dict[str, Any],
+        *,
+        audio: bytes,
+        filename: str,
+        content_type: str,
+        language: str | None = None,
+    ) -> dict[str, Any]:
+        form = {"model": deployment["runtime_model_name"]}
+        if language:
+            form["language"] = language
+        files = {"file": (filename or "audio.webm", audio, content_type or "application/octet-stream")}
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self._root()}/audio/transcriptions",
+                    headers=self._auth_headers(),
+                    data=form,
+                    files=files,
+                )
+        except httpx.TimeoutException as exc:
+            raise PlatformError("timeout", "Runtime timed out.", 504) from exc
+        except httpx.HTTPError as exc:
+            raise PlatformError("runtime_unavailable", "Runtime is unavailable.", 503) from exc
+        if response.status_code >= 400:
+            raise PlatformError("runtime_unavailable", "Runtime rejected the request.", 503)
+        payload = response.json()
+        text = payload.get("text") if isinstance(payload, dict) else payload
+        return {"text": str(text or "")}
+
+    async def stream_speech(
+        self,
+        deployment: dict[str, Any],
+        *,
+        text: str,
+        voice: str,
+        response_format: str = "mp3",
+    ) -> AsyncIterator[bytes]:
+        body = {
+            "model": deployment["runtime_model_name"],
+            "input": text,
+            "voice": voice or "alloy",
+            "response_format": response_format or "mp3",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self._root()}/audio/speech",
+                    headers=self._headers(),
+                    json=body,
+                ) as response:
+                    if response.status_code >= 400:
+                        raise PlatformError("runtime_unavailable", "Runtime rejected the request.", 503)
+                    async for chunk in response.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except PlatformError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise PlatformError("timeout", "Runtime timed out.", 504) from exc
+        except httpx.HTTPError as exc:
+            raise PlatformError("runtime_unavailable", "Runtime is unavailable.", 503) from exc

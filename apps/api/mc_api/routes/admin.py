@@ -1,7 +1,8 @@
+import json
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -29,7 +30,7 @@ from mc_api.services import (
 )
 from mc_auth.api_keys import generate_api_key
 from mc_auth.tokens import decode_token, issue_token
-from mc_gateway.gateway import authenticate_key, complete_chat, stream_chat
+from mc_gateway.gateway import authenticate_key, complete_chat, stream_chat, stream_voice_chat
 from mc_shared.db import get_session
 from mc_shared.errors import PlatformError
 from mc_shared.models import ApiKey, Deployment, Model, Organization, OrganizationUser, Project, ProjectModel, Runtime, User
@@ -422,12 +423,20 @@ async def get_dashboard(organization_id: uuid.UUID, request: Request, user: User
     return ok(request, await dashboard(session, organization_id))
 
 
-@router.post("/playground/chat")
-async def playground(body: PlaygroundBody, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    model = (await session.execute(select(Model).where(Model.slug == body.model, Model.is_active.is_(True)))).scalar_one_or_none()
-    if model is None:
-        raise PlatformError("model_not_found", "Model was not found.", 404)
-    if body.project_id is None:
+async def _active_models(session: AsyncSession, slugs: list[str]) -> list[Model]:
+    models: list[Model] = []
+    for slug in slugs:
+        model = (await session.execute(select(Model).where(Model.slug == slug, Model.is_active.is_(True)))).scalar_one_or_none()
+        if model is None:
+            raise PlatformError("model_not_found", "Model was not found.", 404)
+        models.append(model)
+    return models
+
+
+async def _playground_key(
+    session: AsyncSession, user: User, models: list[Model], project_id: uuid.UUID | None
+) -> tuple[ApiKey, Project]:
+    if project_id is None:
         allowed = await member_org_ids(session, user)
         org_query = select(Organization)
         if allowed is not None:
@@ -443,23 +452,31 @@ async def playground(body: PlaygroundBody, request: Request, user: User = Depend
             session.add(project)
             await session.flush()
     else:
-        project = await session.get(Project, body.project_id)
+        project = await session.get(Project, project_id)
         if project is None:
             raise PlatformError("invalid_request", "Project was not found.", 404)
         await assert_org(session, user, project.organization_id)
-    linked = (
-        await session.execute(
-            select(ProjectModel).where(ProjectModel.project_id == project.id, ProjectModel.model_id == model.id)
-        )
-    ).scalar_one_or_none()
-    if linked is None:
-        session.add(ProjectModel(project_id=project.id, model_id=model.id))
-        await session.flush()
-    raw, prefix, digest = generate_api_key()
+    for model in models:
+        linked = (
+            await session.execute(
+                select(ProjectModel).where(ProjectModel.project_id == project.id, ProjectModel.model_id == model.id)
+            )
+        ).scalar_one_or_none()
+        if linked is None:
+            session.add(ProjectModel(project_id=project.id, model_id=model.id))
+    await session.flush()
+    _raw, prefix, digest = generate_api_key()
     ephemeral = ApiKey(project_id=project.id, name="playground", key_prefix=prefix, key_hash=digest, status="active")
     session.add(ephemeral)
     await session.commit()
     await session.refresh(ephemeral)
+    return ephemeral, project
+
+
+@router.post("/playground/chat")
+async def playground(body: PlaygroundBody, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+    models = await _active_models(session, [body.model])
+    ephemeral, project = await _playground_key(session, user, models, body.project_id)
     payload = body.model_dump()
     try:
         if body.stream:
@@ -480,3 +497,71 @@ async def playground(body: PlaygroundBody, request: Request, user: User = Depend
         ephemeral.status = "revoked"
         await session.commit()
         raise
+
+
+@router.post("/playground/voice")
+async def playground_voice(
+    file: UploadFile = File(...),
+    model: str = Form(...),
+    stt_model: str = Form(...),
+    tts_model: str = Form(...),
+    messages: str = Form("[]"),
+    voice: str = Form("alloy"),
+    language: str = Form("fa"),
+    temperature: float | None = Form(0.7),
+    max_tokens: int | None = Form(1024),
+    project_id: uuid.UUID | None = Form(None),
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        history = json.loads(messages or "[]")
+    except json.JSONDecodeError as exc:
+        raise PlatformError("invalid_request", "messages must be JSON.", 400) from exc
+    if not isinstance(history, list):
+        raise PlatformError("invalid_request", "messages must be a list.", 400)
+    models = await _active_models(session, [model, stt_model, tts_model])
+    ephemeral, project = await _playground_key(session, user, models, project_id)
+    payload = {
+        "model": model,
+        "stt_model": stt_model,
+        "tts_model": tts_model,
+        "messages": history,
+        "voice": voice,
+        "language": language,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    audio = await file.read()
+    filename = file.filename or "audio.webm"
+    content_type = file.content_type or "application/octet-stream"
+
+    async def events():
+        try:
+            async for line in stream_voice_chat(
+                session,
+                ephemeral,
+                project,
+                payload,
+                audio=audio,
+                filename=filename,
+                content_type=content_type,
+            ):
+                yield line
+        finally:
+            ephemeral.status = "revoked"
+            await session.commit()
+
+    stream = events()
+    try:
+        first = await anext(stream)
+    except StopAsyncIteration:
+        first = None
+
+    async def body():
+        if first:
+            yield first
+        async for line in stream:
+            yield line
+
+    return StreamingResponse(body(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
