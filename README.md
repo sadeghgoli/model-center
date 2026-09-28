@@ -47,4 +47,14 @@ The panel is `http://localhost:9006`. The API is `http://localhost:9005`. Postgr
 curl http://127.0.0.1:9005/v1/chat/completions -H "Authorization: Bearer sk-gsm-..." -H "Content-Type: application/json" -d "{\"model\":\"qwen3-8b\",\"messages\":[{\"role\":\"user\",\"content\":\"سلام، خودت را معرفی کن.\"}]}"
 ```
 
+## Persian speech
+
+The `tts` service in `apps/tts` serves `mehdi-hf/pocket-tts-farsi-v2` on CPU behind `/v1/audio/speech`. It is a separate container; the gateway reaches it over HTTP like any other runtime. The first start downloads about 1 GB into the `tts-hf-cache` volume and needs about 8 GB of RAM. The model license is CC-BY-NC-4.0.
+
+```powershell
+docker compose --env-file .env -f infra/docker/docker-compose.yml up --build -d tts
+```
+
+Register runtime type `openai_compatible` with endpoint `http://tts:8010/v1`, a model `pocket-tts-fa` of type speech, and a deployment with runtime model name `pocket-tts-farsi-v2`. Voices are `hello`, `short`, and `news`. Output is `wav` or `pcm`. Voice chat also needs a transcription model.
+
 Add `"stream": true` for SSE. The Playground page calls `/api/v1/playground/chat`, which uses the same router and runtime adapter as `/v1/chat/completions`.

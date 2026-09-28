@@ -450,7 +450,7 @@ async def stream_voice_chat(
         chat_adapter = build_runtime(chat_runtime)
         tts_adapter = build_runtime(tts_runtime)
         voice = str(request.get("voice") or "alloy")
-        response_format = str(request.get("response_format") or "mp3")
+        response_format = str(request.get("response_format") or "wav")
 
         async def read_llm() -> None:
             nonlocal completion_text, ttft
@@ -491,7 +491,7 @@ async def stream_voice_chat(
                     await events.put(
                         {
                             "type": "audio",
-                            "format": response_format or "mp3",
+                            "format": response_format,
                             "text": sentence,
                             "audio": base64.b64encode(bytes(spoken)).decode("ascii"),
                         }

@@ -194,8 +194,9 @@ async def test_transcription_speech_and_voice_stream(client: AsyncClient, monkey
     assert "data: [DONE]" in body
     assert speech_inputs == ["سلام.", "خوبی؟"]
     audio_line = next(line for line in body.splitlines() if '"type": "audio"' in line)
-    payload = audio_line.removeprefix("data: ")
-    assert base64.b64decode(json.loads(payload)["audio"]) == b"ID3fake"
+    payload = json.loads(audio_line.removeprefix("data: "))
+    assert base64.b64decode(payload["audio"]) == b"ID3fake"
+    assert payload["format"] == "wav"
 
     panel = await client.post(
         "/api/v1/playground/voice",

@@ -25,16 +25,17 @@ print(response.choices[0].message.content)`;
   const speech = `curl ${base}/v1/audio/speech \\
   -H "Authorization: Bearer sk-gsm-xxxxxxxx" \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"tts","input":"سلام","voice":"alloy"}' \\
-  --output reply.mp3`;
+  -d '{"model":"pocket-tts-fa","input":"سلام.","voice":"hello","response_format":"wav"}' \\
+  --output reply.wav`;
   const voice = `curl ${base}/v1/audio/chat \\
   -H "Authorization: Bearer sk-gsm-xxxxxxxx" \\
   -F "file=@speech.webm" \\
   -F "model=qwen3-8b" \\
   -F "stt_model=whisper" \\
-  -F "tts_model=tts" \\
+  -F "tts_model=pocket-tts-fa" \\
   -F "messages=[]" \\
-  -F "voice=alloy" \\
+  -F "voice=hello" \\
+  -F "response_format=wav" \\
   -F "language=fa"`;
   return (
     <Shell>

@@ -51,10 +51,18 @@ async def _rest(first, iterator: AsyncIterator):
         yield item
 
 
+_AUDIO_TYPES = {
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "pcm": "audio/pcm",
+    "opus": "audio/ogg",
+    "aac": "audio/aac",
+    "flac": "audio/flac",
+}
+
+
 def _audio_type(response_format: str) -> str:
-    if response_format == "mp3":
-        return "audio/mpeg"
-    return "application/octet-stream"
+    return _AUDIO_TYPES.get(response_format, "application/octet-stream")
 
 
 def _history(raw: str) -> list:
@@ -150,6 +158,7 @@ async def audio_chat(
     messages: str = Form("[]"),
     voice: str = Form("alloy"),
     language: str = Form("fa"),
+    response_format: str = Form("wav"),
     temperature: float | None = Form(None),
     max_tokens: int | None = Form(None),
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -163,6 +172,7 @@ async def audio_chat(
         "messages": _history(messages),
         "voice": voice,
         "language": language,
+        "response_format": response_format,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }

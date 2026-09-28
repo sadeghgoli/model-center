@@ -1,0 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.9.1+cpu
+# PyPI pocket-tts rejects this model's model.yaml (unknown key
+# capitalize_first_letter). The fork accepts those flags. Without them the
+# text frontend upper-cases the first phoneme and drops or rewrites the first word.
+pocket-tts @ git+https://github.com/mallahyari/pocket-tts@main
+transformers>=4.44
+sentencepiece
+numpy
+scipy
+soundfile
+huggingface_hub
+fastapi
+uvicorn

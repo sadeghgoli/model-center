@@ -9,7 +9,9 @@ import { api } from "@/lib/api";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type ModelChoice = { slug: string; display_name: string; is_active: boolean; model_type?: string };
-type VoiceEvent = { type?: string; text?: string; delta?: string; audio?: string };
+type VoiceEvent = { type?: string; text?: string; delta?: string; audio?: string; format?: string };
+
+const audioTypes: Record<string, string> = { mp3: "audio/mpeg", wav: "audio/wav", opus: "audio/ogg", aac: "audio/aac", flac: "audio/flac" };
 
 function decodeAudio(value: string) {
   const binary = atob(value);
@@ -29,7 +31,7 @@ export default function PlaygroundPage() {
   const [model, setModel] = useState("qwen3-4b");
   const [sttModel, setSttModel] = useState("");
   const [ttsModel, setTtsModel] = useState("");
-  const [voiceName, setVoiceName] = useState("alloy");
+  const [voiceName, setVoiceName] = useState("hello");
   const [language, setLanguage] = useState("fa");
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
@@ -41,7 +43,7 @@ export default function PlaygroundPage() {
   const audioCtx = useRef<AudioContext | null>(null);
   const playback = useRef(Promise.resolve());
 
-  function enqueueClip(bytes: Uint8Array) {
+  function enqueueClip(bytes: Uint8Array, format: string) {
     const ctx = audioCtx.current;
     playback.current = playback.current.then(async () => {
       if (ctx) {
@@ -57,11 +59,11 @@ export default function PlaygroundPage() {
           });
           return;
         } catch {
-          /* mp3 decode can fail; the element below still plays the clip */
+          /* decodeAudioData can reject some encodings; the element below still plays the clip */
         }
       }
       const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-      const url = URL.createObjectURL(new Blob([copy], { type: "audio/mpeg" }));
+      const url = URL.createObjectURL(new Blob([copy], { type: audioTypes[format] ?? "audio/wav" }));
       await new Promise<void>((resolve) => {
         const audio = new Audio(url);
         audio.onended = () => {
@@ -157,8 +159,9 @@ export default function PlaygroundPage() {
       form.append("model", model);
       form.append("stt_model", speechModel);
       form.append("tts_model", speakerModel);
-      form.append("voice", voiceName || "alloy");
+      form.append("voice", voiceName || "hello");
       form.append("language", language || "fa");
+      form.append("response_format", "wav");
       form.append("messages", JSON.stringify([{ role: "system", content: "تو یک دستیار فارسی هستی." }, ...history]));
       const response = await fetch("/api/backend/api/v1/playground/voice", { method: "POST", body: form });
       if (!response.ok || !response.body) {
@@ -194,7 +197,7 @@ export default function PlaygroundPage() {
             const visible = assistant;
             setMessages([...shown, { role: "assistant", content: visible }]);
           }
-          if (parsed.type === "audio" && parsed.audio) enqueueClip(decodeAudio(parsed.audio));
+          if (parsed.type === "audio" && parsed.audio) enqueueClip(decodeAudio(parsed.audio), parsed.format ?? "wav");
         }
       }
       if (!assistant.trim()) setError("پاسخی از مدل نرسید.");

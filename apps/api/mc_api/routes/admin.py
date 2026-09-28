@@ -508,6 +508,7 @@ async def playground_voice(
     messages: str = Form("[]"),
     voice: str = Form("alloy"),
     language: str = Form("fa"),
+    response_format: str = Form("wav"),
     temperature: float | None = Form(0.7),
     max_tokens: int | None = Form(1024),
     project_id: uuid.UUID | None = Form(None),
@@ -529,6 +530,7 @@ async def playground_voice(
         "messages": history,
         "voice": voice,
         "language": language,
+        "response_format": response_format,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }

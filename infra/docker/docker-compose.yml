@@ -76,5 +76,25 @@ services:
     depends_on:
       - api
 
+  tts:
+    build:
+      context: ../..
+      dockerfile: apps/tts/Dockerfile
+    environment:
+      POCKET_TTS_API_KEY: ${POCKET_TTS_API_KEY:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+    ports:
+      - "0.0.0.0:${TTS_PORT:-9009}:8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request,sys; sys.exit(json.load(urllib.request.urlopen('http://127.0.0.1:8010/health'))['status'] != 'ok')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 600s
+    volumes:
+      - tts-hf-cache:/root/.cache/huggingface
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+  tts-hf-cache:
