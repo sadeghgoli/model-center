@@ -36,6 +36,41 @@ function decodeAudio(value: string) {
   return bytes;
 }
 
+const WAV_RATE = 16000;
+
+async function toWav(blob: Blob, ctx: AudioContext): Promise<Blob> {
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const length = Math.max(1, Math.ceil(decoded.duration * WAV_RATE));
+  const offline = new OfflineAudioContext(1, length, WAV_RATE);
+  const source = offline.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offline.destination);
+  source.start();
+  const samples = (await offline.startRendering()).getChannelData(0);
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const text = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
+  };
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  text(8, "WAVE");
+  text(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, WAV_RATE, true);
+  view.setUint32(28, WAV_RATE * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  samples.forEach((value, index) => {
+    const clamped = Math.max(-1, Math.min(1, value));
+    view.setInt16(44 + index * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+  });
+  return new Blob([view.buffer], { type: "audio/wav" });
+}
+
 export default function PlaygroundPage() {
   const models = useQuery({ queryKey: ["models"], queryFn: () => api("/api/backend/api/v1/models") });
   const choices = (models.data?.body?.data?.models ?? []) as ModelChoice[];
@@ -202,8 +237,19 @@ export default function PlaygroundPage() {
     const controller = new AbortController();
     inflight.current = controller;
     try {
+      const ctx = ensureAudio();
+      let upload = blob;
+      let uploadName = "speech.webm";
+      if (ctx) {
+        try {
+          upload = await toWav(blob, ctx);
+          uploadName = "speech.wav";
+        } catch {
+          upload = blob;
+        }
+      }
       const form = new FormData();
-      form.append("file", blob, "speech.webm");
+      form.append("file", upload, uploadName);
       form.append("model", model);
       form.append("stt_model", speechModel);
       form.append("tts_model", speakerModel);
