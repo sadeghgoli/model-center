@@ -43,6 +43,9 @@ export default function ModelsPage() {
         <Button type="submit">افزودن مدل</Button>
       </form>
       {error ? <p className="text-red-700">{error}</p> : null}
+      {models.isError || (models.data && models.data.status >= 400) ? (
+        <p className="text-red-700">لیست مدل‌ها بارگذاری نشد ({models.data?.body?.error?.message ?? "API در دسترس نیست"}).</p>
+      ) : null}
       {(models.data?.body?.data?.models ?? []).map((model: { id: string; display_name: string; slug: string; model_type: string; context_window: number; is_active: boolean; running_deployments: number; supports_chat: boolean; supports_streaming: boolean; supports_tools: boolean }) => (
         <Card key={model.id}>
           <strong>{model.display_name}</strong>
