@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Shell } from "@/components/shell";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,23 @@ type ChatMessage = { role: "user" | "assistant"; content: string; reasoning?: st
 type ModelChoice = { slug: string; display_name: string; is_active: boolean; model_type?: string };
 type VoiceEvent = { type?: string; text?: string; delta?: string; audio?: string; format?: string };
 
+type Phase = "idle" | "listening" | "hearing" | "thinking" | "playing";
+
 const audioTypes: Record<string, string> = { mp3: "audio/mpeg", wav: "audio/wav", opus: "audio/ogg", aac: "audio/aac", flac: "audio/flac" };
+const phaseLabels: Record<Phase, string> = {
+  idle: "",
+  listening: "در حال گوش دادن… صحبت کنید",
+  hearing: "در حال شنیدن…",
+  thinking: "در حال پاسخ…",
+  playing: "مدل در حال صحبت است…",
+};
+const FRAME_MS = 50;
+const CALIBRATE_MS = 400;
+const SPEECH_START_MS = 150;
+const SILENCE_END_MS = 1000;
+const MIN_SPEECH_MS = 400;
+const MAX_TURN_MS = 30000;
+const IDLE_RESTART_MS = 15000;
 
 function decodeAudio(value: string) {
   const binary = atob(value);
@@ -35,26 +51,55 @@ export default function PlaygroundPage() {
   const [language, setLanguage] = useState("fa");
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
-  const [recording, setRecording] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const recorder = useRef<MediaRecorder | null>(null);
-  const chunks = useRef<Blob[]>([]);
+  const [messages, setMessagesState] = useState<ChatMessage[]>([]);
+  const history = useRef<ChatMessage[]>([]);
   const audioCtx = useRef<AudioContext | null>(null);
   const playback = useRef(Promise.resolve());
+  const playbackGeneration = useRef(0);
+  const playingSource = useRef<AudioBufferSourceNode | null>(null);
+  const talking = useRef(false);
+  const micStream = useRef<MediaStream | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const meter = useRef<number | null>(null);
+  const inflight = useRef<AbortController | null>(null);
+
+  function setMessages(next: ChatMessage[]) {
+    history.current = next;
+    setMessagesState(next);
+  }
+
+  function ensureAudio() {
+    if (!audioCtx.current && window.AudioContext) audioCtx.current = new window.AudioContext();
+    void audioCtx.current?.resume();
+    return audioCtx.current;
+  }
+
+  function stopPlayback() {
+    playbackGeneration.current += 1;
+    playingSource.current?.stop();
+    playingSource.current = null;
+    playback.current = Promise.resolve();
+  }
 
   function enqueueClip(bytes: Uint8Array, format: string) {
     const ctx = audioCtx.current;
+    const generation = playbackGeneration.current;
     playback.current = playback.current.then(async () => {
+      if (generation !== playbackGeneration.current) return;
       if (ctx) {
         try {
           const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
           const decoded = await ctx.decodeAudioData(copy as ArrayBuffer);
+          if (generation !== playbackGeneration.current) return;
           await new Promise<void>((resolve) => {
             const source = ctx.createBufferSource();
             source.buffer = decoded;
             source.connect(ctx.destination);
             source.onended = () => resolve();
+            playingSource.current = source;
             source.start();
           });
           return;
@@ -142,7 +187,7 @@ export default function PlaygroundPage() {
   }
 
   async function sendVoice(blob: Blob) {
-    const history = messages;
+    const previous = history.current;
     const speechModel = sttModel || sttModels[0]?.slug || "";
     const speakerModel = ttsModel || ttsModels[0]?.slug || "";
     if (!speechModel || !speakerModel) {
@@ -153,7 +198,9 @@ export default function PlaygroundPage() {
     setPending(true);
     let assistant = "";
     let reasoning = "";
-    let shown = history;
+    let shown = previous;
+    const controller = new AbortController();
+    inflight.current = controller;
     try {
       const form = new FormData();
       form.append("file", blob, "speech.webm");
@@ -167,10 +214,10 @@ export default function PlaygroundPage() {
         "messages",
         JSON.stringify([
           { role: "system", content: "تو یک دستیار فارسی هستی." },
-          ...history.map((item) => ({ role: item.role, content: item.content })),
+          ...previous.map((item) => ({ role: item.role, content: item.content })),
         ]),
       );
-      const response = await fetch("/api/backend/api/v1/playground/voice", { method: "POST", body: form });
+      const response = await fetch("/api/backend/api/v1/playground/voice", { method: "POST", body: form, signal: controller.signal });
       if (!response.ok || !response.body) {
         const failed = await response.json().catch(() => ({}));
         setError(failed.error?.message ?? "پاسخی از مدل نرسید.");
@@ -196,57 +243,164 @@ export default function PlaygroundPage() {
             continue;
           }
           if (parsed.type === "transcript" && parsed.text) {
-            shown = [...history, { role: "user", content: parsed.text }];
+            shown = [...previous, { role: "user", content: parsed.text }];
             setMessages(shown);
           }
+          if (parsed.type === "error") setError((parsed as { error?: { message?: string } }).error?.message ?? "خطا در پاسخ مدل.");
           if ((parsed.type === "text" || parsed.type === "reasoning") && parsed.delta) {
             if (parsed.type === "text") assistant += parsed.delta;
             else reasoning += parsed.delta;
             setMessages([...shown, { role: "assistant", content: assistant, reasoning }]);
           }
-          if (parsed.type === "audio" && parsed.audio) enqueueClip(decodeAudio(parsed.audio), parsed.format ?? "wav");
+          if (parsed.type === "audio" && parsed.audio) {
+            if (talking.current) setPhase("playing");
+            enqueueClip(decodeAudio(parsed.audio), parsed.format ?? "wav");
+          }
         }
       }
       if (!assistant.trim()) setError("پاسخی از مدل نرسید.");
+      await playback.current;
+    } catch (failure) {
+      if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "ارتباط با سرور قطع شد.");
     } finally {
+      if (inflight.current === controller) inflight.current = null;
       setPending(false);
     }
   }
 
-  async function startRecording() {
-    if (pending || recording) return;
+  function stopMeter() {
+    if (meter.current !== null) window.clearInterval(meter.current);
+    meter.current = null;
+  }
+
+  function listen() {
+    const stream = micStream.current;
+    const node = analyser.current;
+    if (!talking.current || !stream || !node) return;
+    setPhase("listening");
+    const samples = new Float32Array(node.fftSize);
+    let parts: Blob[] = [];
+    let noise = 0;
+    let calibrated = 0;
+    let loud = 0;
+    let quiet = 0;
+    let spoken = 0;
+    let waited = 0;
+    let heard = false;
+
+    const begin = () => {
+      parts = [];
+      const next = new MediaRecorder(stream);
+      next.ondataavailable = (event) => {
+        if (event.data.size > 0) parts.push(event.data);
+      };
+      next.start(250);
+      recorder.current = next;
+    };
+
+    const finish = (send: boolean) => {
+      stopMeter();
+      const current = recorder.current;
+      recorder.current = null;
+      if (!current || current.state === "inactive") return;
+      current.onstop = () => {
+        if (!send || !talking.current) return;
+        const blob = new Blob(parts, { type: current.mimeType || "audio/webm" });
+        setPhase("thinking");
+        void sendVoice(blob).then(() => listen());
+      };
+      current.stop();
+    };
+
+    begin();
+    meter.current = window.setInterval(() => {
+      node.getFloatTimeDomainData(samples);
+      let sum = 0;
+      for (const value of samples) sum += value * value;
+      const level = Math.sqrt(sum / samples.length);
+      if (calibrated < CALIBRATE_MS) {
+        noise = noise === 0 ? level : noise * 0.8 + level * 0.2;
+        calibrated += FRAME_MS;
+        return;
+      }
+      const threshold = Math.max(0.012, noise * 3);
+      if (level > threshold) {
+        loud += FRAME_MS;
+        quiet = 0;
+      } else {
+        quiet += FRAME_MS;
+        loud = 0;
+        if (!heard) noise = noise * 0.95 + level * 0.05;
+      }
+      if (!heard) {
+        waited += FRAME_MS;
+        if (loud >= SPEECH_START_MS) {
+          heard = true;
+          setPhase("hearing");
+        } else if (waited >= IDLE_RESTART_MS) {
+          finish(false);
+          listen();
+        }
+        return;
+      }
+      spoken += FRAME_MS;
+      if ((quiet >= SILENCE_END_MS && spoken - quiet >= MIN_SPEECH_MS) || spoken >= MAX_TURN_MS) finish(true);
+      else if (quiet >= SILENCE_END_MS) {
+        finish(false);
+        listen();
+      }
+    }, FRAME_MS);
+  }
+
+  async function startConversation() {
+    if (talking.current) return;
     setError("");
-    if (!navigator.mediaDevices?.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setError("مرورگر ضبط صدا را پشتیبانی نمی‌کند.");
       return;
     }
+    const speechModel = sttModel || sttModels[0]?.slug || "";
+    const speakerModel = ttsModel || ttsModels[0]?.slug || "";
+    if (!speechModel || !speakerModel) {
+      setError("مدل تشخیص گفتار و مدل گفتار را انتخاب کنید.");
+      return;
+    }
+    const ctx = ensureAudio();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorded = new MediaRecorder(stream);
-      chunks.current = [];
-      recorded.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.current.push(event.data);
-      };
-      recorded.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(chunks.current, { type: recorded.mimeType || "audio/webm" });
-        void sendVoice(blob);
-      };
-      recorded.start();
-      recorder.current = recorded;
-      setRecording(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      micStream.current = stream;
+      if (ctx) {
+        const node = ctx.createAnalyser();
+        node.fftSize = 1024;
+        ctx.createMediaStreamSource(stream).connect(node);
+        analyser.current = node;
+      }
     } catch {
       setError("دسترسی به میکروفون داده نشد.");
+      return;
     }
+    talking.current = true;
+    listen();
   }
 
-  function stopRecording() {
-    const Ctx = window.AudioContext;
-    if (Ctx && !audioCtx.current) audioCtx.current = new Ctx();
-    void audioCtx.current?.resume();
-    recorder.current?.stop();
-    setRecording(false);
+  function endConversation() {
+    talking.current = false;
+    stopMeter();
+    const current = recorder.current;
+    recorder.current = null;
+    if (current && current.state !== "inactive") {
+      current.onstop = null;
+      current.stop();
+    }
+    inflight.current?.abort();
+    stopPlayback();
+    micStream.current?.getTracks().forEach((track) => track.stop());
+    micStream.current = null;
+    analyser.current = null;
+    setPhase("idle");
   }
+
+  useEffect(() => () => endConversation(), []);
 
   const chatOptions = chatModels.length > 0 ? chatModels : active;
 
@@ -254,12 +408,12 @@ export default function PlaygroundPage() {
     <Shell>
       <h1 className="text-2xl">چت با مدل</h1>
       <div className="flex gap-2">
-        <Button type="button" onClick={() => setMode("text")}>متن</Button>
+        <Button type="button" onClick={() => setMode("text")} disabled={phase !== "idle"}>متن</Button>
         <Button type="button" onClick={() => setMode("voice")}>صوت</Button>
       </div>
       <label className="grid gap-1">
         مدل گفتگو
-        <select className="rounded-md border px-3 py-2" value={model} onChange={(event) => setModel(event.target.value)}>
+        <select className="rounded-md border px-3 py-2" value={model} disabled={phase !== "idle"} onChange={(event) => setModel(event.target.value)}>
           {chatOptions.map((item) => (
             <option key={item.slug} value={item.slug}>{item.display_name} ({item.slug})</option>
           ))}
@@ -267,7 +421,7 @@ export default function PlaygroundPage() {
         </select>
       </label>
       {mode === "voice" ? (
-        <div className="grid gap-3 md:grid-cols-2">
+        <fieldset className="grid gap-3 md:grid-cols-2" disabled={phase !== "idle"}>
           <label className="grid gap-1">
             تشخیص گفتار
             <select className="rounded-md border px-3 py-2" value={sttModel || sttModels[0]?.slug || ""} onChange={(event) => setSttModel(event.target.value)}>
@@ -294,10 +448,10 @@ export default function PlaygroundPage() {
             زبان رونویسی
             <Input value={language} onChange={(event) => setLanguage(event.target.value)} />
           </label>
-        </div>
+        </fieldset>
       ) : null}
       <div className="grid min-h-80 gap-3 rounded-xl border border-stone-200 bg-white p-4">
-        {messages.length === 0 ? <p className="text-stone-500">{mode === "voice" ? "ضبط را شروع کنید تا مدل جواب بدهد." : "پیام بنویسید تا مدل جواب بدهد."}</p> : null}
+        {messages.length === 0 ? <p className="text-stone-500">{mode === "voice" ? "روی «شروع گفتگو» بزنید و صحبت کنید؛ هر بار که ساکت شوید، صدایتان خودکار ارسال می‌شود." : "پیام بنویسید تا مدل جواب بدهد."}</p> : null}
         {messages.map((message, index) => (
           <div key={`${message.role}-${index}`} className="grid gap-1">
             {message.reasoning ? (
@@ -314,8 +468,7 @@ export default function PlaygroundPage() {
             ) : null}
           </div>
         ))}
-        {recording ? <p>در حال ضبط…</p> : null}
-        {pending ? <p>در حال پاسخ…</p> : null}
+        {phase !== "idle" ? <p className="text-stone-600">{phaseLabels[phase]}</p> : pending ? <p>در حال پاسخ…</p> : null}
         {error ? <p className="text-red-700">{error}</p> : null}
       </div>
       {mode === "text" ? (
@@ -325,10 +478,10 @@ export default function PlaygroundPage() {
         </form>
       ) : (
         <div className="flex gap-2">
-          {recording ? (
-            <Button type="button" onClick={stopRecording}>پایان و ارسال</Button>
+          {phase !== "idle" ? (
+            <Button type="button" onClick={endConversation}>پایان گفتگو</Button>
           ) : (
-            <Button type="button" onClick={() => void startRecording()} disabled={pending}>شروع ضبط</Button>
+            <Button type="button" onClick={() => void startConversation()} disabled={pending}>شروع گفتگو</Button>
           )}
         </div>
       )}
