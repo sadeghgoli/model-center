@@ -8,6 +8,9 @@ from mc_shared.errors import PlatformError
 from mc_runtimes.base import ModelRuntime
 from mc_runtimes.openai_compatible import chunk, completion
 
+# Ollama's own default context is small enough to silently drop long system prompts.
+DEFAULT_NUM_CTX = 8192
+
 
 class OllamaRuntime(ModelRuntime):
     def _headers(self) -> dict[str, str]:
@@ -25,13 +28,13 @@ class OllamaRuntime(ModelRuntime):
         }
         if request.get("tools") is not None:
             body["tools"] = request["tools"]
-        options = {}
+        configuration = deployment.get("configuration") or {}
+        options: dict[str, Any] = {"num_ctx": int(configuration.get("num_ctx") or DEFAULT_NUM_CTX)}
         if request.get("temperature") is not None:
             options["temperature"] = request["temperature"]
         if request.get("max_tokens") is not None:
             options["num_predict"] = request["max_tokens"]
-        if options:
-            body["options"] = options
+        body["options"] = options
         return body
 
     async def health_check(self, deployment: dict[str, Any] | None = None) -> dict[str, Any]:

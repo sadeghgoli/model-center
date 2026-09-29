@@ -127,6 +127,14 @@ async def test_ollama_stream_keeps_thinking_separate(monkeypatch) -> None:
     assert deltas[1] == {"content": "سلام."}
 
 
+def test_ollama_sends_context_size() -> None:
+    runtime = OllamaRuntime("http://ollama:11434")
+    default = runtime._payload({"runtime_model_name": "qwen3:8b"}, {"messages": [], "max_tokens": 50}, False)
+    assert default["options"] == {"num_ctx": 8192, "num_predict": 50}
+    custom = runtime._payload({"runtime_model_name": "qwen3:8b", "configuration": {"num_ctx": 16384}}, {"messages": []}, False)
+    assert custom["options"]["num_ctx"] == 16384
+
+
 def test_upload_name_keeps_or_adds_extension() -> None:
     assert upload_name("speech.webm", "audio/webm") == "speech.webm"
     assert upload_name("blob", "audio/webm;codecs=opus") == "blob.webm"
