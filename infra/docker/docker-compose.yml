@@ -95,6 +95,37 @@ services:
       - tts-hf-cache:/root/.cache/huggingface
     restart: unless-stopped
 
+  asr:
+    profiles: ["asr"]
+    build:
+      context: ../..
+      dockerfile: apps/asr/Dockerfile
+      args:
+        TORCH_INDEX: ${ASR_TORCH_INDEX:-https://download.pytorch.org/whl/cu124}
+    environment:
+      ASR_API_KEY: ${ASR_API_KEY:-}
+      ASR_DEVICE: ${ASR_DEVICE:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+    ports:
+      - "0.0.0.0:${ASR_PORT:-9011}:8011"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request,sys; sys.exit(json.load(urllib.request.urlopen('http://127.0.0.1:8011/health'))['status'] != 'ok')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 900s
+    volumes:
+      - asr-hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   tts-hf-cache:
+  asr-hf-cache:

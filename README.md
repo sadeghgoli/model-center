@@ -57,4 +57,16 @@ docker compose --env-file .env -f infra/docker/docker-compose.yml up --build -d 
 
 Register runtime type `openai_compatible` with endpoint `http://tts:8010/v1`, a model `pocket-tts-fa` of type speech, and a deployment with runtime model name `pocket-tts-farsi-v2`. Voices are `hello`, `short`, and `news`. Output is `wav` or `pcm`. Voice chat also needs a transcription model.
 
+## Persian transcription (BuzzASR)
+
+The `asr` service in `apps/asr` serves `BuzzASR/persian`, a full fine-tune of Whisper large-v3 with its own tokenizer, behind `/v1/audio/transcriptions`. It runs through transformers, not faster-whisper, because the replaced tokenizer moves Whisper's special token ids. It is in the `asr` profile and reserves the NVIDIA GPU; it needs about 5 GB of VRAM. The first start downloads about 3.1 GB into the `asr-hf-cache` volume. The model license is MIT.
+
+```powershell
+docker compose --env-file .env -f infra/docker/docker-compose.yml --profile asr up --build -d asr
+```
+
+Without a GPU, remove the `deploy` block, set `ASR_TORCH_INDEX=https://download.pytorch.org/whl/cpu` in `.env`, and expect several seconds per second of audio and about 8 GB of RAM.
+
+Register runtime type `openai_compatible` with endpoint `http://asr:8011/v1`, a model `buzz-fa` of type transcription, and a deployment with runtime model name `BuzzASR/persian`.
+
 Add `"stream": true` for SSE. The Playground page calls `/api/v1/playground/chat`, which uses the same router and runtime adapter as `/v1/chat/completions`.
