@@ -59,7 +59,13 @@ async def test_api_key_lifecycle_and_chat(client: AsyncClient, monkeypatch) -> N
         },
     )
     assert deployment.status_code == 201
-    await client.post(f"/api/v1/projects/{project_id}/models", headers=auth(access), json={"model_id": model_id})
+    allowed = await client.post(f"/api/v1/projects/{project_id}/models", headers=auth(access), json={"model_id": model_id})
+    assert allowed.status_code == 201
+    again = await client.post(f"/api/v1/projects/{project_id}/models", headers=auth(access), json={"model_id": model_id})
+    assert again.status_code == 200
+    assert again.json()["data"]["already_allowed"] is True
+    missing = await client.post(f"/api/v1/projects/{project_id}/models", headers=auth(access), json={"model_id": ""})
+    assert missing.status_code == 400
     created = await client.post(
         f"/api/v1/projects/{project_id}/api-keys",
         headers=auth(access),

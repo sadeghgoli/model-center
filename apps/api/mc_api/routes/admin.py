@@ -377,10 +377,20 @@ async def allow_model(project_id: uuid.UUID, body: dict, request: Request, user:
     if project is None:
         raise PlatformError("invalid_request", "Project was not found.", 404)
     await assert_org(session, user, project.organization_id)
-    model_id = uuid.UUID(str(body["model_id"]))
+    try:
+        model_id = uuid.UUID(str(body.get("model_id") or ""))
+    except ValueError as exc:
+        raise PlatformError("invalid_request", "Select a model.", 400) from exc
+    if await session.get(Model, model_id) is None:
+        raise PlatformError("invalid_request", "Model was not found.", 404)
+    existing = await session.scalar(
+        select(ProjectModel).where(ProjectModel.project_id == project.id, ProjectModel.model_id == model_id)
+    )
+    if existing is not None:
+        return ok(request, {"project_id": str(project.id), "model_id": str(model_id), "already_allowed": True})
     session.add(ProjectModel(project_id=project.id, model_id=model_id))
     await session.commit()
-    return ok(request, {"project_id": str(project.id), "model_id": str(model_id)}, 201)
+    return ok(request, {"project_id": str(project.id), "model_id": str(model_id), "already_allowed": False}, 201)
 
 
 @router.get("/projects/{project_id}/models")

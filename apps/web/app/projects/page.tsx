@@ -22,6 +22,12 @@ export default function ProjectsPage() {
   const [modelId, setModelId] = useState("");
   const [keyName, setKeyName] = useState("gsm-voice");
   const [rawKey, setRawKey] = useState("");
+  const [notice, setNotice] = useState("");
+  const allowed = useQuery({
+    queryKey: ["project-models", selected],
+    enabled: Boolean(selected),
+    queryFn: () => api(`/api/backend/api/v1/projects/${selected}/models`),
+  });
 
   async function createOrg(event: FormEvent) {
     event.preventDefault();
@@ -38,12 +44,27 @@ export default function ProjectsPage() {
 
   async function allowModel(event: FormEvent) {
     event.preventDefault();
-    await api(`/api/backend/api/v1/projects/${selected}/models`, { method: "POST", body: JSON.stringify({ model_id: modelId }) });
+    if (!modelId) {
+      setNotice("اول یک مدل از فهرست انتخاب کنید.");
+      return;
+    }
+    const result = await api(`/api/backend/api/v1/projects/${selected}/models`, { method: "POST", body: JSON.stringify({ model_id: modelId }) });
+    if (result.status >= 400) {
+      setNotice(`خطا: ${result.body.error?.message ?? result.status}`);
+      return;
+    }
+    setNotice(result.body.data?.already_allowed ? "این مدل از قبل برای پروژه فعال بود." : "دسترسی مدل فعال شد.");
+    queryClient.invalidateQueries({ queryKey: ["project-models", selected] });
   }
 
   async function createKey(event: FormEvent) {
     event.preventDefault();
     const result = await api(`/api/backend/api/v1/projects/${selected}/api-keys`, { method: "POST", body: JSON.stringify({ name: keyName, model_ids: modelId ? [modelId] : [] }) });
+    if (result.status >= 400) {
+      setNotice(`خطا: ${result.body.error?.message ?? result.status}`);
+      return;
+    }
+    setNotice("");
     setRawKey(result.body.data?.api_key ?? "");
   }
 
@@ -74,6 +95,11 @@ export default function ProjectsPage() {
             ))}
           </select>
           <Button type="submit">فعال کردن دسترسی مدل</Button>
+          <p className="text-sm">
+            مدل‌های فعال این پروژه:{" "}
+            {(allowed.data?.body?.data?.models ?? []).map((model: { slug: string }) => model.slug).join("، ") || "هیچ"}
+          </p>
+          {notice ? <p className="text-sm">{notice}</p> : null}
           <Input value={keyName} onChange={(event) => setKeyName(event.target.value)} />
           <Button type="button" onClick={createKey}>ساخت کلید API</Button>
           {rawKey ? <p>کلید فقط یک‌بار نشان داده می‌شود: {rawKey}</p> : null}
