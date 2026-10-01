@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 os.environ.setdefault("JWT_SECRET", "test-secret-key-must-be-long-enough")
 os.environ.setdefault("AI_PLATFORM_SECRET", "test-platform-secret-value")
-os.environ.setdefault("REDIS_URL", "")
+os.environ["REDIS_URL"] = ""
 os.environ.setdefault("DEFAULT_ADMIN_EMAIL", "")
 os.environ.setdefault("DEFAULT_ADMIN_PASSWORD", "")
 
